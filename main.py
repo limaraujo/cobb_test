@@ -8,7 +8,12 @@ from PyQt6.QtCore import Qt, QPointF, QTimer
 import sys
 import numpy as np
 
+"""
+App para visualização e cálculo do ângulo de Cobb em imagens radiográficas.
+"""
 # ---------------- Funções de geometria ----------------
+def log(msg):
+    pass  # Troque por print(msg) ou logging se quiser depurar
 def ponto_interseccao(p1, p2, q1, q2):
     """Calcula o ponto de interseção de duas retas, ou None se paralelas."""
     x1, y1 = p1.x(), p1.y()
@@ -57,6 +62,7 @@ def prolongar_reta_para_encontro(p1: QPointF, p2: QPointF, encontro: QPointF, la
 
 # ---------------- CobbAngleItem ----------------
 class CobbAngleItem:
+    """Representa o ângulo de Cobb entre duas linhas."""
     def __init__(self, line1: 'LineConnection', line2: 'LineConnection', scene: QGraphicsScene):
         self.line1 = line1
         self.line2 = line2
@@ -124,6 +130,7 @@ class CobbAngleItem:
 
 # ---------------- DraggablePoint ----------------
 class DraggablePoint(QGraphicsEllipseItem):
+    """Ponto arrastável na cena gráfica."""
     def __init__(self, pos: QPointF, r=6):
         super().__init__(-r, -r, 2*r, 2*r)
         self.setBrush(QColor("red"))
@@ -141,6 +148,7 @@ class DraggablePoint(QGraphicsEllipseItem):
 
 # ---------------- LineConnection ----------------
 class LineConnection:
+    """Conexão entre dois pontos, representando uma linha manipulável."""
     def __init__(self, scene, p1, p2, color=Qt.GlobalColor.blue, width=2):
         self.scene = scene
         self.p1 = p1
@@ -218,11 +226,12 @@ class LineConnection:
 
 
 class ZoomableGraphicsView(QGraphicsView):
+    """QGraphicsView com suporte a zoom centralizado e limites."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.zoom_factor = 1.15
-        self.zoom_min = 0.1
-        self.zoom_max = 10
+        self.zoom_min = 0.5
+        self.zoom_max = 5
         self.current_zoom = 1.0
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -230,19 +239,29 @@ class ZoomableGraphicsView(QGraphicsView):
 
     def wheelEvent(self, event):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:  # ctrl+scroll = zoom
-            delta = event.angleDelta().y() / 120  # cada “passo” do mouse
-            factor = self.zoom_factor ** delta
-            new_zoom = self.current_zoom * factor
-            if self.zoom_min <= new_zoom <= self.zoom_max:
-                self.scale(factor, factor)
-                self.current_zoom = new_zoom
+            delta = event.angleDelta().y() / 120
+            self.apply_zoom(self.zoom_factor ** delta)
             event.accept()
         else:
-            super().wheelEvent(event)  # scroll normal para pan
+            super().wheelEvent(event)
+    
+    # --------- Função de zoom centralizada com limites ----------
+    def apply_zoom(self, factor):
+        """Aplica o zoom com limites definidos."""
+        new_zoom = self.current_zoom * factor
+        if new_zoom > self.zoom_max:
+            factor = self.zoom_max / self.current_zoom
+            new_zoom = self.zoom_max
+        elif new_zoom < self.zoom_min:
+            factor = self.zoom_min / self.current_zoom
+            new_zoom = self.zoom_min
+        self.scale(factor, factor)
+        self.current_zoom = new_zoom
 
 
 # ---------------- CustomScene ----------------
 class CustomScene(QGraphicsScene):
+    """Cena customizada para manipulação dos pontos e linhas do Cobb."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.viewer = None
@@ -282,6 +301,7 @@ class CustomScene(QGraphicsScene):
         super().mousePressEvent(event)
 
 class ImageViewer(QMainWindow):
+    """Janela principal do aplicativo de visualização do ângulo de Cobb."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visualizador de Cobb Angle")
@@ -303,6 +323,10 @@ class ImageViewer(QMainWindow):
         self.button_zoom_in = QPushButton("+")
         self.button_zoom_in.clicked.connect(self.zoom_in)
         layout.addWidget(self.button_zoom_in)
+
+        self.button_zoom_reset = QPushButton(" Reset Zoom ")
+        self.button_zoom_reset.clicked.connect(self.reset_zoom)
+        layout.addWidget(self.button_zoom_reset)
 
         self.button_zoom_out = QPushButton("-")
         self.button_zoom_out.clicked.connect(self.zoom_out)
@@ -327,12 +351,10 @@ class ImageViewer(QMainWindow):
         self.lines = []
         self.cobb_angles = []
         self.adding_angle = False
-        self.zoom_factor = 1.15
-        self.zoom_max = 10
-        self.zoom_min = 0.1
-        self.current_zoom = 1.0
+
 
     def open_image(self):
+        """Abre uma imagem e reseta a cena."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Selecione a Imagem", "", "Imagens (*.png *.jpg *.jpeg *.bmp)"
         )
@@ -341,11 +363,12 @@ class ImageViewer(QMainWindow):
             self.scene.clear()
             self.pixmap_item = QGraphicsPixmapItem(pixmap)
             self.scene.addItem(self.pixmap_item)
+            self.view.resetTransform()
+            self.view.current_zoom = 1.0
             self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
             self.points = []
             self.lines = []
             self.cobb_angles = []
-            self.current_zoom = 1.0
 
     def enable_add_angle(self):
         if not self.pixmap_item:
@@ -366,31 +389,24 @@ class ImageViewer(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.pixmap_item:
+            self.view.resetTransform()
+            self.view.current_zoom = 1.0
             self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
-            self.current_zoom = 1.0
 
     # --------- Zoom com botões ----------
     def zoom_in(self):
-        self._apply_zoom(self.zoom_factor)
+        self.view.apply_zoom(self.view.zoom_factor)
 
     def zoom_out(self):
-        self._apply_zoom(1 / self.zoom_factor)
+        self.view.apply_zoom(1 / self.view.zoom_factor)
 
-    # --------- Zoom com roda do mouse ----------
-    def wheelEvent(self, event):
+    def reset_zoom(self):
+        """Reseta o zoom e centraliza a imagem."""
+        self.view.resetTransform()
+        self.view.current_zoom = 1.0
         if self.pixmap_item:
-            delta = event.angleDelta().y()
-            if delta > 0:
-                self._apply_zoom(self.zoom_factor)
-            else:
-                self._apply_zoom(1 / self.zoom_factor)
+            self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
 
-    # --------- Função de zoom centralizada com limites ----------
-    def _apply_zoom(self, factor):
-        new_zoom = self.current_zoom * factor
-        if self.zoom_min <= new_zoom <= self.zoom_max:
-            self.view.scale(factor, factor)
-            self.current_zoom = new_zoom
 
 # ---------------- Execução ----------------
 if __name__ == "__main__":
