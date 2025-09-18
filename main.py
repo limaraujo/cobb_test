@@ -1,10 +1,14 @@
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QFileDialog,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QVBoxLayout, QWidget,
-    QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsLineItem, QMenu
+    QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsLineItem, QMenu, QApplication, 
+    QMainWindow, QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLabel
 )
-from PyQt6.QtGui import QPixmap, QColor, QPen, QFont
+from PyQt6.QtGui import QPixmap, QColor, QPen, QFont, QPainter
+from PyQt6.QtGui import QPixmap, QColor, QPen, QFont, QPainter 
 from PyQt6.QtCore import Qt, QPointF, QTimer
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QSize
 import sys
 import numpy as np
 
@@ -92,8 +96,16 @@ class CobbAngleItem:
         self.line2.angles.append(self)
 
     def calculate_angle(self):
+        # Obtém os pontos
         p1, p2 = self.line1.p1, self.line1.p2
         q1, q2 = self.line2.p1, self.line2.p2
+
+        if p1.pos().x() > p2.pos().x():
+            p1, p2 = p2, p1
+        if q1.pos().x() > q2.pos().x():
+            q1, q2 = q2, q1
+
+        # Vetores normalizados
         v1 = np.array([p2.pos().x() - p1.pos().x(), p2.pos().y() - p1.pos().y()])
         v2 = np.array([q2.pos().x() - q1.pos().x(), q2.pos().y() - q1.pos().y()])
 
@@ -101,12 +113,12 @@ class CobbAngleItem:
         norm = np.linalg.norm(v1) * np.linalg.norm(v2)
         cos_theta = dot / norm if norm != 0 else 0
         theta_rad = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+        theta_deg = np.degrees(theta_rad)
 
+        # Prolonga linhas para visualização
         largura = self.scene.viewer.pixmap_item.pixmap().width()
         altura = self.scene.viewer.pixmap_item.pixmap().height()
-
         intersec = ponto_interseccao(p1.pos(), p2.pos(), q1.pos(), q2.pos())
-
         if intersec is not None:
             start1, end1 = prolongar_reta_para_encontro(p1.pos(), p2.pos(), intersec, largura, altura)
             start2, end2 = prolongar_reta_para_encontro(q1.pos(), q2.pos(), intersec, largura, altura)
@@ -116,7 +128,7 @@ class CobbAngleItem:
             self.ext_line1.setLine(p1.pos().x(), p1.pos().y(), p2.pos().x(), p2.pos().y())
             self.ext_line2.setLine(q1.pos().x(), q1.pos().y(), q2.pos().x(), q2.pos().y())
 
-        return theta_rad, np.degrees(theta_rad)
+        return theta_rad, theta_deg
 
     def update(self):
         self.angle_rad, self.angle_deg = self.calculate_angle()
@@ -124,9 +136,11 @@ class CobbAngleItem:
         self.update_text_position()
 
     def update_text_position(self):
+        # Posição do texto no centro aproximado das linhas
         x = (self.line1.p1.pos().x() + self.line2.p1.pos().x()) / 2
         y = (self.line1.p1.pos().y() + self.line2.p1.pos().y()) / 2
         self.text_item.setPos(x + 5, y + 5)
+
 
 # ---------------- DraggablePoint ----------------
 class DraggablePoint(QGraphicsEllipseItem):
@@ -302,6 +316,21 @@ class CustomScene(QGraphicsScene):
 
 class ImageViewer(QMainWindow):
     """Janela principal do aplicativo de visualização do ângulo de Cobb."""
+    button_style = """
+    QPushButton {
+        background-color: transparent;   /* sem cor de fundo */
+        color: black;                     /* texto preto */
+        border: 0.5px solid rgba(128, 128, 128, 0.2);       /* borda verde */
+        border-radius: 5px;               /* cantos arredondados */
+        padding: 8px 16px;                /* espaço interno */
+        font-size: 14px;                  /* tamanho da fonte */
+        min-height: 26px;  
+    }
+
+    QPushButton:hover {
+        background-color: rgba(128, 128, 128, 0.2);  /* cinza bem suave */
+    }
+    """
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visualizador de Cobb Angle")
@@ -312,25 +341,54 @@ class ImageViewer(QMainWindow):
         layout = QVBoxLayout(central_widget)
 
         # Botões
-        self.button_open = QPushButton("Selecionar Imagem")
+        # Botões com ícones
+        self.button_open = QPushButton(" Selecionar Arquivo")
+        self.button_open.setIcon(QIcon("icons/upload.png"))
+        self.button_open.setIconSize(QSize(24, 24))
+        self.button_open.setStyleSheet(self.button_style)
         self.button_open.clicked.connect(self.open_image)
-        layout.addWidget(self.button_open)
+        
+        self.button_save = QPushButton("Salvar Imagem")
+        self.button_save.setIcon(QIcon("icons/download.png"))
+        self.button_save.setIconSize(QSize(20, 20))
+        self.button_save.setStyleSheet(self.button_style)
+        self.button_save.clicked.connect(self.save_image)
 
-        self.button_angle = QPushButton("Adicionar Ângulo de Cobb")
+        self.button_angle = QPushButton("Ângulo de Cobb")
+        self.button_angle.setIcon(QIcon("icons/angle.png"))
+        self.button_angle.setIconSize(QSize(24, 24))
+        self.button_angle.setStyleSheet(self.button_style)
         self.button_angle.clicked.connect(self.enable_add_angle)
-        layout.addWidget(self.button_angle)
 
-        self.button_zoom_in = QPushButton("+")
+        self.button_zoom_in = QPushButton()
+        self.button_zoom_in.setIcon(QIcon("icons/zoom_in.png"))
+        self.button_zoom_in.setIconSize(QSize(24, 24))
+        self.button_zoom_in.setStyleSheet(self.button_style)
         self.button_zoom_in.clicked.connect(self.zoom_in)
-        layout.addWidget(self.button_zoom_in)
 
-        self.button_zoom_reset = QPushButton(" Reset Zoom ")
+        self.button_zoom_reset = QPushButton("Reset")
+        self.button_zoom_reset.setIcon(QIcon("icons/zoom_reset.png"))
+        self.button_zoom_reset.setIconSize(QSize(20, 20))
+        self.button_zoom_reset.setStyleSheet(self.button_style)
         self.button_zoom_reset.clicked.connect(self.reset_zoom)
-        layout.addWidget(self.button_zoom_reset)
 
-        self.button_zoom_out = QPushButton("-")
+        self.button_zoom_out = QPushButton()
+        self.button_zoom_out.setIcon(QIcon("icons/zoom_out.png"))
+        self.button_zoom_out.setIconSize(QSize(24, 24))
+        self.button_zoom_out.setStyleSheet(self.button_style)
         self.button_zoom_out.clicked.connect(self.zoom_out)
-        layout.addWidget(self.button_zoom_out)
+        
+        buttons_layout = QHBoxLayout()
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addWidget(self.button_open)
+        buttons_layout.addWidget(self.button_save)
+        buttons_layout.addWidget(self.button_angle)
+        buttons_layout.addWidget(self.button_zoom_in)
+        buttons_layout.addWidget(self.button_zoom_reset)
+        buttons_layout.addWidget(self.button_zoom_out)
+
+        layout.addLayout(buttons_layout)
+        
 
         # QGraphicsView
         self.view = ZoomableGraphicsView()
@@ -344,6 +402,13 @@ class ImageViewer(QMainWindow):
         self.scene = CustomScene()
         self.scene.viewer = self
         self.view.setScene(self.scene)
+        
+        self.footer = QLabel("©2025 limaraujo.")
+        self.footer.setStyleSheet("background-color: lightgray; padding: 5px;")
+        self.footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(self.footer)  # adicione direto, sem addStretch()
+            
 
         # Variáveis
         self.pixmap_item = None
@@ -385,6 +450,30 @@ class ImageViewer(QMainWindow):
             print(f"Ângulo de Cobb: {angle_item.angle_deg:.2f}°")
         else:
             print("Erro: É necessário ter pelo menos 2 linhas.")
+            
+    def save_image(self):
+        """Salva a visualização atual como imagem."""
+        if not self.pixmap_item:
+            print("Nenhuma imagem carregada para salvar.")
+            return
+
+        # Garante que todos os itens estejam visíveis
+        self.view.fitInView(self.scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        rect = self.scene.itemsBoundingRect()
+        image = QPixmap(int(rect.width()), int(rect.height()))
+        image.fill(Qt.GlobalColor.white)
+
+        painter = QPainter(image)
+        self.scene.render(painter, target=rect, source=rect)
+        painter.end()
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Salvar Imagem", "", "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp)"
+        )
+        if path:
+            image.save(path)
+            print(f"Imagem salva em: {path}")
+
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -393,7 +482,7 @@ class ImageViewer(QMainWindow):
             self.view.current_zoom = 1.0
             self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
 
-    # --------- Zoom com botões ----------
+        # --------- Zoom com botões ----------
     def zoom_in(self):
         self.view.apply_zoom(self.view.zoom_factor)
 
