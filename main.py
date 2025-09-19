@@ -1,16 +1,14 @@
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QFileDialog,
-    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QVBoxLayout, QWidget,
-    QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsLineItem, QMenu, QApplication, 
-    QMainWindow, QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLabel
+    QApplication, QMainWindow, QPushButton, QFileDialog, QGraphicsView,
+    QGraphicsScene, QGraphicsPixmapItem, QVBoxLayout, QWidget,
+    QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsLineItem, QMenu, QLabel,
+    QColorDialog, QHBoxLayout
 )
-from PyQt6.QtGui import QPixmap, QColor, QPen, QFont, QPainter
-from PyQt6.QtGui import QPixmap, QColor, QPen, QFont, QPainter 
-from PyQt6.QtCore import Qt, QPointF, QTimer
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import QSize
+from PyQt6.QtGui import QPixmap, QColor, QPen, QFont, QPainter, QIcon
+from PyQt6.QtCore import Qt, QPointF, QSize, QRectF,  Qt, QPointF, QSize, QRectF
 import sys
 import numpy as np
+import os
 
 """
 App para visualização e cálculo do ângulo de Cobb em imagens radiográficas.
@@ -49,8 +47,8 @@ def prolongar_reta_para_encontro(p1: QPointF, p2: QPointF, encontro: QPointF, la
         origem = p2_arr
         dir_final = -dir_vec / np.linalg.norm(dir_vec)
 
-    xmin, xmax = 0.05 * largura, 0.95 * largura
-    ymin, ymax = 0.05 * altura, 0.95 * altura
+    xmin, xmax = 0.1 * largura, 0.9 * largura
+    ymin, ymax = 0.1 * altura, 0.9 * altura
 
     ts = []
     if dir_final[0] != 0:
@@ -67,15 +65,17 @@ def prolongar_reta_para_encontro(p1: QPointF, p2: QPointF, encontro: QPointF, la
 # ---------------- CobbAngleItem ----------------
 class CobbAngleItem:
     """Representa o ângulo de Cobb entre duas linhas."""
-    def __init__(self, line1: 'LineConnection', line2: 'LineConnection', scene: QGraphicsScene):
+    def __init__(self, line1: 'LineConnection', line2: 'LineConnection', scene: QGraphicsScene, COLOR=Qt.GlobalColor.blue):
         self.line1 = line1
         self.line2 = line2
         self.scene = scene
+        self.line_color = COLOR
 
         # Linhas prolongadas visuais
         self.ext_line1 = QGraphicsLineItem()
         self.ext_line2 = QGraphicsLineItem()
-        pen_ext = QPen(Qt.GlobalColor.green, 1, Qt.PenStyle.DashLine)
+        pen_ext = QPen(COLOR, 4, Qt.PenStyle.CustomDashLine)
+        pen_ext.setDashPattern([4, 3])
         self.ext_line1.setPen(pen_ext)
         self.ext_line2.setPen(pen_ext)
         scene.addItem(self.ext_line1)
@@ -86,6 +86,12 @@ class CobbAngleItem:
 
         # Texto do ângulo
         self.text_item = QGraphicsTextItem(f"{self.angle_deg:.1f}°")
+        self.text_item.setZValue(2)
+        self.text_item.setFlags(
+            QGraphicsLineItem.GraphicsItemFlag.ItemIsSelectable |
+            QGraphicsLineItem.GraphicsItemFlag.ItemIsFocusable |
+            QGraphicsLineItem.GraphicsItemFlag.ItemIsMovable
+        )
         self.text_item.setDefaultTextColor(Qt.GlobalColor.darkRed)
         self.text_item.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         scene.addItem(self.text_item)
@@ -95,10 +101,10 @@ class CobbAngleItem:
         self.line1.angles.append(self)
         self.line2.angles.append(self)
 
-    def calculate_angle(self):
-        # Obtém os pontos
+    def calculate_angle(self):        
         p1, p2 = self.line1.p1, self.line1.p2
         q1, q2 = self.line2.p1, self.line2.p2
+
 
         if p1.pos().x() > p2.pos().x():
             p1, p2 = p2, p1
@@ -119,14 +125,12 @@ class CobbAngleItem:
         largura = self.scene.viewer.pixmap_item.pixmap().width()
         altura = self.scene.viewer.pixmap_item.pixmap().height()
         intersec = ponto_interseccao(p1.pos(), p2.pos(), q1.pos(), q2.pos())
-        if intersec is not None:
-            start1, end1 = prolongar_reta_para_encontro(p1.pos(), p2.pos(), intersec, largura, altura)
-            start2, end2 = prolongar_reta_para_encontro(q1.pos(), q2.pos(), intersec, largura, altura)
-            self.ext_line1.setLine(start1.x(), start1.y(), end1.x(), end1.y())
-            self.ext_line2.setLine(start2.x(), start2.y(), end2.x(), end2.y())
-        else:
-            self.ext_line1.setLine(p1.pos().x(), p1.pos().y(), p2.pos().x(), p2.pos().y())
-            self.ext_line2.setLine(q1.pos().x(), q1.pos().y(), q2.pos().x(), q2.pos().y())
+        for ext_line, a, b in [
+            (self.ext_line1, p1.pos(), p2.pos()),
+            (self.ext_line2, q1.pos(), q2.pos())
+        ]:
+            start, end = prolongar_reta_para_encontro(a, b, intersec, largura, altura) if intersec is not None else (a, b)
+            ext_line.setLine(start.x(), start.y(), end.x(), end.y())
 
         return theta_rad, theta_deg
 
@@ -163,7 +167,7 @@ class DraggablePoint(QGraphicsEllipseItem):
 # ---------------- LineConnection ----------------
 class LineConnection:
     """Conexão entre dois pontos, representando uma linha manipulável."""
-    def __init__(self, scene, p1, p2, color=Qt.GlobalColor.blue, width=2):
+    def __init__(self, scene, p1, p2, color=Qt.GlobalColor.blue, width=4):
         self.scene = scene
         self.p1 = p1
         self.p2 = p2
@@ -171,8 +175,10 @@ class LineConnection:
 
         self.line = QGraphicsLineItem()
         self.line.setPen(QPen(color, width))
-        self.line.setFlag(QGraphicsLineItem.GraphicsItemFlag.ItemIsSelectable, True)
-        self.line.setFlag(QGraphicsLineItem.GraphicsItemFlag.ItemIsFocusable, True)
+        self.line.setFlags(
+            QGraphicsLineItem.GraphicsItemFlag.ItemIsSelectable |
+            QGraphicsLineItem.GraphicsItemFlag.ItemIsFocusable
+        )
         self.line.mousePressEvent = self.on_click_line
         scene.addItem(self.line)
         self.update_line()
@@ -199,13 +205,25 @@ class LineConnection:
         return new_item_change
 
     def on_click_line(self, event):
-        if event.button() == Qt.MouseButton.RightButton:
-            angles_associados = [angle for angle in self.angles if angle in self.scene.viewer.cobb_angles]
-            if angles_associados:
-                menu = QMenu()
-                menu.addAction("Remover Ângulo de Cobb", lambda: self.remove_cobb_angle())
-                menu.exec(event.screenPos())
+        if event.button() in [Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton]:
+            menu = QMenu()
+            if any(angle in self.scene.viewer.cobb_angles for angle in self.angles):
+                menu.addAction("Remover Ângulo de Cobb").triggered.connect(self.remove_cobb_angle)
+            menu.addAction("Mudar Cor da Linha").triggered.connect(self.change_line_color)
+            menu.exec(event.screenPos())
         super(QGraphicsLineItem, self.line).mousePressEvent(event)
+
+    def change_line_color(self):
+        color = QColorDialog.getColor()
+        if color.isValid():
+            for angle in self.angles:
+                if angle in self.scene.viewer.cobb_angles:
+                    angle.line1.line.setPen(QPen(color, 4))
+                    angle.line2.line.setPen(QPen(color, 4))
+                    pen_ext = QPen(color, 4, Qt.PenStyle.CustomDashLine)
+                    pen_ext.setDashPattern([4, 3])
+                    angle.ext_line1.setPen(pen_ext)
+                    angle.ext_line2.setPen(pen_ext)
 
     def remove_cobb_angle(self):
         for angle in self.angles[:]:
@@ -243,7 +261,7 @@ class ZoomableGraphicsView(QGraphicsView):
     """QGraphicsView com suporte a zoom centralizado e limites."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.zoom_factor = 1.15
+        self.zoom_factor = 1.1
         self.zoom_min = 0.5
         self.zoom_max = 5
         self.current_zoom = 1.0
@@ -271,7 +289,6 @@ class ZoomableGraphicsView(QGraphicsView):
             new_zoom = self.zoom_min
         self.scale(factor, factor)
         self.current_zoom = new_zoom
-
 
 # ---------------- CustomScene ----------------
 class CustomScene(QGraphicsScene):
@@ -303,7 +320,7 @@ class CustomScene(QGraphicsScene):
     def addConnectionLine(self):
         if len(self.line_points) >= 2:
             p1, p2 = self.line_points[-2], self.line_points[-1]
-            self.viewer.lines.append(LineConnection(self, p1, p2))
+            self.viewer.lines.append(LineConnection(self, p1, p2, color=self.viewer.selected_cobb_color))
             print(f"Linha criada entre: ({p1.pos().x():.2f},{p1.pos().y():.2f}) -> "
                   f"({p2.pos().x():.2f},{p2.pos().y():.2f})")
 
@@ -328,9 +345,11 @@ class ImageViewer(QMainWindow):
     }
 
     QPushButton:hover {
-        background-color: rgba(128, 128, 128, 0.2);  /* cinza bem suave */
+        background-color: #e0e0e0;
+        border: 1px solid #888;
     }
     """
+        
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visualizador de Cobb Angle")
@@ -340,55 +359,28 @@ class ImageViewer(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
+        self.selected_cobb_color = Qt.GlobalColor.blue  
+
         # Botões
-        # Botões com ícones
-        self.button_open = QPushButton(" Selecionar Arquivo")
-        self.button_open.setIcon(QIcon("icons/upload.png"))
-        self.button_open.setIconSize(QSize(24, 24))
-        self.button_open.setStyleSheet(self.button_style)
-        self.button_open.clicked.connect(self.open_image)
-        
-        self.button_save = QPushButton("Salvar Imagem")
-        self.button_save.setIcon(QIcon("icons/download.png"))
-        self.button_save.setIconSize(QSize(20, 20))
-        self.button_save.setStyleSheet(self.button_style)
-        self.button_save.clicked.connect(self.save_image)
+        buttons = [
+            ("Selecionar Arquivo", "icons/upload.png", self.open_image),
+            ("Salvar Imagem", "icons/download.png", self.save_image),
+            ("Ângulo de Cobb", "icons/angle.png", self.open_color_dialog),
+            ("", "icons/zoom_in.png", self.zoom_in),
+            ("Reset", "icons/zoom_reset.png", self.reset_zoom),
+            ("", "icons/zoom_out.png", self.zoom_out),
+        ]
 
-        self.button_angle = QPushButton("Ângulo de Cobb")
-        self.button_angle.setIcon(QIcon("icons/angle.png"))
-        self.button_angle.setIconSize(QSize(24, 24))
-        self.button_angle.setStyleSheet(self.button_style)
-        self.button_angle.clicked.connect(self.enable_add_angle)
-
-        self.button_zoom_in = QPushButton()
-        self.button_zoom_in.setIcon(QIcon("icons/zoom_in.png"))
-        self.button_zoom_in.setIconSize(QSize(24, 24))
-        self.button_zoom_in.setStyleSheet(self.button_style)
-        self.button_zoom_in.clicked.connect(self.zoom_in)
-
-        self.button_zoom_reset = QPushButton("Reset")
-        self.button_zoom_reset.setIcon(QIcon("icons/zoom_reset.png"))
-        self.button_zoom_reset.setIconSize(QSize(20, 20))
-        self.button_zoom_reset.setStyleSheet(self.button_style)
-        self.button_zoom_reset.clicked.connect(self.reset_zoom)
-
-        self.button_zoom_out = QPushButton()
-        self.button_zoom_out.setIcon(QIcon("icons/zoom_out.png"))
-        self.button_zoom_out.setIconSize(QSize(24, 24))
-        self.button_zoom_out.setStyleSheet(self.button_style)
-        self.button_zoom_out.clicked.connect(self.zoom_out)
-        
         buttons_layout = QHBoxLayout()
-        buttons_layout = QHBoxLayout()
-        buttons_layout.addWidget(self.button_open)
-        buttons_layout.addWidget(self.button_save)
-        buttons_layout.addWidget(self.button_angle)
-        buttons_layout.addWidget(self.button_zoom_in)
-        buttons_layout.addWidget(self.button_zoom_reset)
-        buttons_layout.addWidget(self.button_zoom_out)
+        for text, icon_path, slot in buttons:
+            btn = QPushButton(text)
+            btn.setIcon(QIcon(icon_path))
+            btn.setIconSize(QSize(24, 24))
+            btn.setStyleSheet(self.button_style)
+            btn.clicked.connect(slot)
+            buttons_layout.addWidget(btn)
 
         layout.addLayout(buttons_layout)
-        
 
         # QGraphicsView
         self.view = ZoomableGraphicsView()
@@ -402,13 +394,12 @@ class ImageViewer(QMainWindow):
         self.scene = CustomScene()
         self.scene.viewer = self
         self.view.setScene(self.scene)
-        
+
         self.footer = QLabel("©2025 limaraujo.")
-        self.footer.setStyleSheet("background-color: lightgray; padding: 5px;")
+        self.footer.setStyleSheet("background-color: transparent; padding: 5px;")
         self.footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(self.footer)  # adicione direto, sem addStretch()
-            
 
         # Variáveis
         self.pixmap_item = None
@@ -419,13 +410,12 @@ class ImageViewer(QMainWindow):
 
 
     def open_image(self):
-        """Abre uma imagem e reseta a cena."""
+    # Abre uma imagem e reseta a cena.
         path, _ = QFileDialog.getOpenFileName(
             self, "Selecione a Imagem", "", "Imagens (*.png *.jpg *.jpeg *.bmp)"
         )
         if path:
             pixmap = QPixmap(path)
-            self.scene.clear()
             self.pixmap_item = QGraphicsPixmapItem(pixmap)
             self.scene.addItem(self.pixmap_item)
             self.view.resetTransform()
@@ -435,46 +425,62 @@ class ImageViewer(QMainWindow):
             self.lines = []
             self.cobb_angles = []
 
-    def enable_add_angle(self):
+    def open_color_dialog(self):
         if not self.pixmap_item:
             print("Selecione uma imagem primeiro.")
             return
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.selected_cobb_color = color
+        else:
+            self.selected_cobb_color = Qt.GlobalColor.blue
+        self.enable_add_angle()
+
+    def enable_add_angle(self):
         self.adding_angle = True
         print("Modo de adicionar ângulo de Cobb ativado. Clique na imagem para adicionar 4 pontos (2 linhas).")
 
     def calculate_angle(self):
         if len(self.lines) >= 2:
             line1, line2 = self.lines[-2], self.lines[-1]
-            angle_item = CobbAngleItem(line1, line2, self.scene)
+            # Usa a cor selecionada
+            angle_item = CobbAngleItem(line1, line2, self.scene, COLOR=self.selected_cobb_color)
             self.cobb_angles.append(angle_item)
             print(f"Ângulo de Cobb: {angle_item.angle_deg:.2f}°")
         else:
             print("Erro: É necessário ter pelo menos 2 linhas.")
             
     def save_image(self):
-        """Salva a visualização atual como imagem."""
         if not self.pixmap_item:
             print("Nenhuma imagem carregada para salvar.")
             return
 
-        # Garante que todos os itens estejam visíveis
-        self.view.fitInView(self.scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
         rect = self.scene.itemsBoundingRect()
         image = QPixmap(int(rect.width()), int(rect.height()))
         image.fill(Qt.GlobalColor.white)
 
         painter = QPainter(image)
-        self.scene.render(painter, target=rect, source=rect)
+        self.scene.render(painter, target=QRectF(image.rect()), source=rect)
         painter.end()
 
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Salvar Imagem", "", "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp)"
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Salvar Imagem", "",
+            "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp)"
         )
         if path:
-            image.save(path)
-            print(f"Imagem salva em: {path}")
-
-
+            ext = os.path.splitext(path)[1]
+            if not ext:
+                ext_map = {"PNG": ".png", "JPEG": ".jpg", "BMP": ".bmp"}
+            for key, val in ext_map.items():
+                if key in selected_filter:
+                    path += val
+                break
+            if image.save(path):
+                print(f"Imagem salva em: {path}")
+            else:
+                print("Erro ao salvar imagem.")
+                
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.pixmap_item:
@@ -490,11 +496,15 @@ class ImageViewer(QMainWindow):
         self.view.apply_zoom(1 / self.view.zoom_factor)
 
     def reset_zoom(self):
-        """Reseta o zoom e centraliza a imagem."""
+    # Reseta o zoom e centraliza a imagem.
         self.view.resetTransform()
         self.view.current_zoom = 1.0
         if self.pixmap_item:
             self.view.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+            
+    def open_settings_menu(self):
+        print("menu aberto")
+        pass
 
 
 # ---------------- Execução ----------------
