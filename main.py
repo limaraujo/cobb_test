@@ -41,10 +41,10 @@ def prolongar_reta_para_encontro(p1: QPointF, p2: QPointF, encontro: QPointF, la
 
     encontro_arr = np.array([encontro.x(), encontro.y()])
     if np.dot(encontro_arr - p1_arr, dir_vec) > 0:
-        origem = p1_arr
+        origem = p2_arr
         dir_final = dir_vec / np.linalg.norm(dir_vec)
     else:
-        origem = p2_arr
+        origem = p1_arr
         dir_final = -dir_vec / np.linalg.norm(dir_vec)
 
     xmin, xmax = 0.1 * largura, 0.9 * largura
@@ -70,6 +70,10 @@ class CobbAngleItem:
         self.line2 = line2
         self.scene = scene
         self.line_color = COLOR
+        self.font_size = 26  # Tamanho padrão da fonte
+        self.is_resizing = False
+        self.resize_start_pos = None
+        self.resize_start_size = None
 
         # Linhas prolongadas visuais
         self.ext_line1 = QGraphicsLineItem()
@@ -82,7 +86,7 @@ class CobbAngleItem:
         scene.addItem(self.ext_line2)
 
         # Calcula ângulo e atualiza prolongamentos
-        self.angle_rad, self.angle_deg = self.calculate_angle()
+        self.angle_deg = self.calculate_angle()
 
         # Texto do ângulo
         self.text_item = QGraphicsTextItem(f"{self.angle_deg:.1f}°")
@@ -92,8 +96,14 @@ class CobbAngleItem:
             QGraphicsLineItem.GraphicsItemFlag.ItemIsFocusable |
             QGraphicsLineItem.GraphicsItemFlag.ItemIsMovable
         )
-        self.text_item.setDefaultTextColor(Qt.GlobalColor.darkRed)
-        self.text_item.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.text_item.setDefaultTextColor(COLOR)
+        self.text_item.setFont(QFont("Arial", self.font_size, QFont.Weight.Bold))
+        
+        # Conecta eventos do mouse
+        self.text_item.mousePressEvent = self.on_text_press
+        self.text_item.mouseMoveEvent = self.on_text_move
+        self.text_item.mouseReleaseEvent = self.on_text_release
+        
         scene.addItem(self.text_item)
         self.update_text_position()
 
@@ -101,10 +111,101 @@ class CobbAngleItem:
         self.line1.angles.append(self)
         self.line2.angles.append(self)
 
+    def on_text_press(self, event):
+        """Manipula clique no texto - inicia redimensionamento ou menu."""
+        if event.button() == Qt.MouseButton.RightButton:
+            # Menu de contexto para seleção de tamanho
+            menu = QMenu()
+            
+            # Opções de tamanho da fonte
+            sizes = [16, 20, 24, 26, 30, 36, 42, 48, 56, 64]
+            for size in sizes:
+                action = menu.addAction(f"Tamanho {size}")
+                action.triggered.connect(lambda checked, s=size: self.change_font_size(s))
+                if size == self.font_size:
+                    action.setCheckable(True)
+                    action.setChecked(True)
+            
+            menu.exec(event.screenPos())
+            
+        elif event.button() == Qt.MouseButton.LeftButton:
+            # Verifica se clicou próximo à borda para redimensionar
+            item_rect = self.text_item.boundingRect()
+            local_pos = event.pos()
+            
+            # Área de redimensionamento nas bordas (últimos 10 pixels)
+            resize_margin = 10
+            near_right = local_pos.x() > item_rect.width() - resize_margin
+            near_bottom = local_pos.y() > item_rect.height() - resize_margin
+            
+            if near_right or near_bottom:
+                # Inicia modo de redimensionamento
+                self.is_resizing = True
+                self.resize_start_pos = event.scenePos()
+                self.resize_start_size = self.font_size
+                self.text_item.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                print("Modo de redimensionamento ativado. Arraste para redimensionar.")
+            else:
+                # Movimento normal do texto
+                super(QGraphicsTextItem, self.text_item).mousePressEvent(event)
+
+    def on_text_move(self, event):
+        """Manipula movimento do mouse sobre o texto."""
+        if self.is_resizing and self.resize_start_pos:
+            # Calcula mudança na posição
+            current_pos = event.scenePos()
+            delta_x = current_pos.x() - self.resize_start_pos.x()
+            delta_y = current_pos.y() - self.resize_start_pos.y()
+            
+            # Usa a maior variação para determinar o novo tamanho
+            delta = max(delta_x, delta_y)
+            
+            # Calcula novo tamanho (sensibilidade ajustável)
+            sensitivity = 0.2  # Quanto menor, menos sensível
+            new_size = max(12, min(72, self.resize_start_size + delta * sensitivity))
+            
+            # Atualiza tamanho em tempo real
+            self.font_size = int(new_size)
+            font = QFont("Arial", self.font_size, QFont.Weight.Bold)
+            self.text_item.setFont(font)
+            
+        else:
+            # Verifica se está sobre área de redimensionamento para mudar cursor
+            item_rect = self.text_item.boundingRect()
+            local_pos = event.pos()
+            
+            resize_margin = 10
+            near_right = local_pos.x() > item_rect.width() - resize_margin
+            near_bottom = local_pos.y() > item_rect.height() - resize_margin
+            
+            if near_right or near_bottom:
+                self.text_item.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            else:
+                self.text_item.setCursor(Qt.CursorShape.ArrowCursor)
+                # Movimento normal
+                super(QGraphicsTextItem, self.text_item).mouseMoveEvent(event)
+
+    def on_text_release(self, event):
+        """Manipula soltar o botão do mouse."""
+        if self.is_resizing:
+            self.is_resizing = False
+            self.resize_start_pos = None
+            self.resize_start_size = None
+            self.text_item.setCursor(Qt.CursorShape.ArrowCursor)
+            print(f"Redimensionamento concluído. Novo tamanho: {self.font_size}")
+        else:
+            super(QGraphicsTextItem, self.text_item).mouseReleaseEvent(event)
+
+    def change_font_size(self, new_size):
+        """Altera o tamanho da fonte do texto."""
+        self.font_size = new_size
+        font = QFont("Arial", self.font_size, QFont.Weight.Bold)
+        self.text_item.setFont(font)
+        print(f"Tamanho da fonte alterado para: {new_size}")
+
     def calculate_angle(self):        
         p1, p2 = self.line1.p1, self.line1.p2
         q1, q2 = self.line2.p1, self.line2.p2
-
 
         if p1.pos().x() > p2.pos().x():
             p1, p2 = p2, p1
@@ -132,11 +233,14 @@ class CobbAngleItem:
             start, end = prolongar_reta_para_encontro(a, b, intersec, largura, altura) if intersec is not None else (a, b)
             ext_line.setLine(start.x(), start.y(), end.x(), end.y())
 
-        return theta_rad, theta_deg
+        return theta_deg
 
     def update(self):
-        self.angle_rad, self.angle_deg = self.calculate_angle()
+        self.angle_deg = self.calculate_angle()
         self.text_item.setPlainText(f"{self.angle_deg:.1f}°")
+        # Mantém o tamanho da fonte atual
+        font = QFont("Arial", self.font_size, QFont.Weight.Bold)
+        self.text_item.setFont(font)
         self.update_text_position()
 
     def update_text_position(self):
@@ -161,7 +265,7 @@ class DraggablePoint(QGraphicsEllipseItem):
 
     def itemChange(self, change, value):
         if change == QGraphicsEllipseItem.GraphicsItemChange.ItemPositionChange:
-            print(f"Ponto movido para: {value.x():.2f}, {value.y():.2f}")
+            pass
         return super().itemChange(change, value)
 
 # ---------------- LineConnection ----------------
@@ -193,6 +297,9 @@ class LineConnection:
             self.p1.pos().x(), self.p1.pos().y(),
             self.p2.pos().x(), self.p2.pos().y()
         )
+        
+        for angle in self.angles:
+            angle.update()
 
     def wrap_item_change(self, point):
         old_item_change = point.itemChange
@@ -220,10 +327,15 @@ class LineConnection:
                 if angle in self.scene.viewer.cobb_angles:
                     angle.line1.line.setPen(QPen(color, 4))
                     angle.line2.line.setPen(QPen(color, 4))
+                    
                     pen_ext = QPen(color, 4, Qt.PenStyle.CustomDashLine)
                     pen_ext.setDashPattern([4, 3])
                     angle.ext_line1.setPen(pen_ext)
                     angle.ext_line2.setPen(pen_ext)
+                    
+                    angle.text_item.setDefaultTextColor(color)
+                    
+                    angle.line_color = color
 
     def remove_cobb_angle(self):
         for angle in self.angles[:]:
@@ -306,12 +418,13 @@ class CustomScene(QGraphicsScene):
             self.line_points.append(point)
             print(f"Ponto adicionado em: {pos.x():.2f}, {pos.y():.2f}")
 
-            if len(self.line_points) % 2 == 0:
+            if len(self.line_points) % 2 == 0 :
                 self.addConnectionLine()
 
             if len(self.line_points) == 4:
                 self.viewer.calculate_angle()
                 self.viewer.adding_angle = False
+                self.viewer.cobb_button.setStyleSheet(self.viewer.button_style)
                 self.line_points = []
                 print("Modo de adicionar ângulo de Cobb desativado")
 
@@ -328,7 +441,13 @@ class CustomScene(QGraphicsScene):
         pos = event.scenePos()
         if self.viewer and self.viewer.pixmap_item and self.viewer.adding_angle:
             if self.viewer.pixmap_item.contains(pos):
-                self.addPoint(pos)
+                min_distance = 6
+                too_close = any(
+                    ((pos.x() - p.pos().x())**2 + (pos.y() - p.pos().y())**2)**0.5 < min_distance 
+                    for p in self.viewer.points
+                )
+                if not too_close:
+                    self.addPoint(pos)
         super().mousePressEvent(event)
 
 class ImageViewer(QMainWindow):
@@ -365,7 +484,7 @@ class ImageViewer(QMainWindow):
         buttons = [
             ("Selecionar Arquivo", "icons/upload.png", self.open_image),
             ("Salvar Imagem", "icons/download.png", self.save_image),
-            ("Ângulo de Cobb", "icons/angle.png", self.open_color_dialog),
+            ("Ângulo de Cobb", "icons/angle.png", self.enable_add_angle),
             ("", "icons/zoom_in.png", self.zoom_in),
             ("Reset", "icons/zoom_reset.png", self.reset_zoom),
             ("", "icons/zoom_out.png", self.zoom_out),
@@ -379,9 +498,11 @@ class ImageViewer(QMainWindow):
             btn.setStyleSheet(self.button_style)
             btn.clicked.connect(slot)
             buttons_layout.addWidget(btn)
-
+            if text == "Ângulo de Cobb":
+               self.cobb_button = btn  # referência para habilitar/desabilitar se necessário
+            
         layout.addLayout(buttons_layout)
-
+        
         # QGraphicsView
         self.view = ZoomableGraphicsView()
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)  # ativa pan
@@ -437,7 +558,13 @@ class ImageViewer(QMainWindow):
         self.enable_add_angle()
 
     def enable_add_angle(self):
+        self.selected_cobb_color = Qt.GlobalColor.blue
         self.adding_angle = True
+        if self.cobb_button:
+            self.cobb_button.setStyleSheet(
+                self.button_style +
+                "QPushButton { background-color: #1976d2; border: 1px solid rgba(10, 73, 112, 1); background-color: rgba(52, 139, 210, 1); }"
+            )
         print("Modo de adicionar ângulo de Cobb ativado. Clique na imagem para adicionar 4 pontos (2 linhas).")
 
     def calculate_angle(self):
@@ -476,10 +603,7 @@ class ImageViewer(QMainWindow):
                 if key in selected_filter:
                     path += val
                 break
-            if image.save(path):
-                print(f"Imagem salva em: {path}")
-            else:
-                print("Erro ao salvar imagem.")
+            print("Imagem salva." if image.save(path) else "Erro ao salvar imagem.")
                 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -496,7 +620,6 @@ class ImageViewer(QMainWindow):
         self.view.apply_zoom(1 / self.view.zoom_factor)
 
     def reset_zoom(self):
-    # Reseta o zoom e centraliza a imagem.
         self.view.resetTransform()
         self.view.current_zoom = 1.0
         if self.pixmap_item:
