@@ -10,6 +10,13 @@ import sys
 import numpy as np
 import os
 
+def resource_path(relative_path):
+    """Retorna o caminho absoluto de arquivos, compatível com PyInstaller."""
+    if hasattr(sys, "_MEIPASS"):
+        # Quando rodando como exe, PyInstaller cria pasta temporária _MEIPASS
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 """
 App para visualização e cálculo do ângulo de Cobb em imagens radiográficas.
 """
@@ -480,7 +487,6 @@ class ImageViewer(QMainWindow):
 
         self.selected_cobb_color = Qt.GlobalColor.blue  
 
-        # Botões
         buttons = [
             ("Selecionar Arquivo", "icons/upload.png", self.open_image),
             ("Salvar Imagem", "icons/download.png", self.save_image),
@@ -493,13 +499,15 @@ class ImageViewer(QMainWindow):
         buttons_layout = QHBoxLayout()
         for text, icon_path, slot in buttons:
             btn = QPushButton(text)
-            btn.setIcon(QIcon(icon_path))
+            # usa resource_path para o caminho do ícone
+            btn.setIcon(QIcon(resource_path(icon_path)))
             btn.setIconSize(QSize(24, 24))
             btn.setStyleSheet(self.button_style)
             btn.clicked.connect(slot)
             buttons_layout.addWidget(btn)
             if text == "Ângulo de Cobb":
-               self.cobb_button = btn  # referência para habilitar/desabilitar se necessário
+                self.cobb_button = btn
+
             
         layout.addLayout(buttons_layout)
         
